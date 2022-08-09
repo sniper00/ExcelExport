@@ -3,54 +3,51 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
-using XLua;
-
-using LuaAPI = XLua.LuaDLL.Lua;
-using RealStatePtr = System.IntPtr;
-using LuaCSFunction = XLua.LuaDLL.lua_CSFunction;
+using KeraLua;
+using LuaState = System.IntPtr;
 
 namespace ExcelExport
 {
     public class ExcelReader
     {
-        public delegate void TypePush(RealStatePtr L, object o);
+        public delegate void TypePush(LuaState L, object o);
 
-        static void PushBool(RealStatePtr L, object o)
+        static void PushBool(LuaState L, object o)
         {
             bool v = (bool)o;
-            LuaAPI.lua_pushboolean(L, v);
+            LuaAPI.lua_pushboolean(L, v?1:0);
         }
-        static void PushInt(RealStatePtr L, object o)
+        static void PushInt(LuaState L, object o)
         {
             int v = (int)o;
-            LuaAPI.lua_pushint64(L, v);
+            LuaAPI.lua_pushinteger(L, v);
         }
 
-        static void PushLong(RealStatePtr L, object o)
+        static void PushLong(LuaState L, object o)
         {
             long v = (long)o;
-            LuaAPI.lua_pushint64(L, v);
+            LuaAPI.lua_pushinteger(L, v);
         }
 
-        static void PushUInt(RealStatePtr L, object o)
+        static void PushUInt(LuaState L, object o)
         {
             uint v = (uint)o;
-            LuaAPI.lua_pushint64(L, v);
+            LuaAPI.lua_pushinteger(L, v);
         }
 
-        static void PushULong(RealStatePtr L, object o)
+        static void PushULong(LuaState L, object o)
         {
             ulong v = (ulong)o;
-            LuaAPI.lua_pushint64(L, (long)v);
+            LuaAPI.lua_pushinteger(L, (long)v);
         }
 
-        static void PushFloat(RealStatePtr L, object o)
+        static void PushFloat(LuaState L, object o)
         {
             float v = (float)o;
             long lv = (long)v;
             if (lv == v)
             {
-                LuaAPI.lua_pushint64(L, lv);
+                LuaAPI.lua_pushinteger(L, lv);
             }
             else
             {
@@ -58,13 +55,13 @@ namespace ExcelExport
             }
         }
 
-        static void PushDouble(RealStatePtr L, object o)
+        static void PushDouble(LuaState L, object o)
         {
             double v = (double)o;
             long lv = (long)v;
             if (lv == v)
             {
-                LuaAPI.lua_pushint64(L, lv);
+                LuaAPI.lua_pushinteger(L, lv);
             }
             else
             {
@@ -72,10 +69,9 @@ namespace ExcelExport
             }
         }
 
-        static void PushString(RealStatePtr L, object o)
+        static void PushString(LuaState L, object o)
         {
-            string v = (string)o;
-            LuaAPI.lua_pushstring(L, v);
+            LuaAPI.lua_pushutf8string(L, (string)o);
         }
 
         static Dictionary<Type, TypePush> ToLuaMap = new Dictionary<Type, TypePush>
@@ -90,13 +86,13 @@ namespace ExcelExport
             { typeof(string),PushString }
         };
 
-        static void PushDataTable(RealStatePtr L, ObjectTranslator translator, DataTable dt)
+        static void PushDataTable(LuaState L, DataTable dt)
         {
-            LuaAPI.lua_newtable(L);
+            LuaAPI.lua_createtable(L, dt.Rows.Count, 0);
             int ordinal = 1;
             foreach (DataRow row in dt.Rows)
             {
-                LuaAPI.lua_newtable(L);
+                LuaAPI.lua_createtable(L, dt.Columns.Count, 0);
                 foreach (DataColumn col in dt.Columns)
                 {
                     object value = row[col];
@@ -105,32 +101,30 @@ namespace ExcelExport
                     if (fn != null)
                     {
                         fn(L, value);
-                        LuaAPI.xlua_rawseti(L, -2, col.Ordinal + 1);
+                        LuaAPI.lua_rawseti(L, -2, col.Ordinal + 1);
                     }
                 }
-                LuaAPI.xlua_rawseti(L, -2, ordinal++);
+                LuaAPI.lua_rawseti(L, -2, ordinal++);
             }
         }
 
-        [MonoPInvokeCallbackAttribute(typeof(LuaCSFunction))]
-        public static int Read(RealStatePtr L)
+        [MonoPInvokeCallback(typeof(LuaFunction))]
+        static int Read(LuaState L)
         {
-            ObjectTranslator translator = ObjectTranslatorPool.Instance.Find(L);
             string filePath = "";
             try
             {
-                translator.Get(L, 1, out filePath);
-
+                filePath = LuaAPI.lua_checkstring(L, 1);
                 FileStream fileStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using (var reader = ExcelReaderFactory.CreateReader(fileStream))
                 {
                     var dataset = reader.AsDataSet();
-                    LuaAPI.lua_newtable(L);
+                    LuaAPI.lua_createtable(L, dataset.Tables.Count, 0);
                     int ordinal = 1;
                     foreach (DataTable t in dataset.Tables)
                     {
-                        PushDataTable(L, translator, t);
-                        LuaAPI.xlua_rawseti(L, -2, ordinal++);
+                        PushDataTable(L, t);
+                        LuaAPI.lua_rawseti(L, -2, ordinal++);
                     }
                     return 1;
                 }
@@ -138,20 +132,21 @@ namespace ExcelExport
             catch (Exception ex)
             {
                 LuaAPI.lua_pushboolean(L, false);
-                translator.Push(L, string.Format("ExcelDataReader File {0} {1}", filePath, ex.Message));
+                LuaAPI.lua_pushstring(L, "ExcelDataReader File {0} {1}", filePath, ex.Message);
                 return 2;
             }
         }
 
-        static LuaCSFunction templateRead = Read;
-
-        [MonoPInvokeCallback(typeof(LuaCSFunction))]
-        public static int OpenLib(RealStatePtr L)
+        static readonly LuaRegister[] l = new LuaRegister[]
         {
-            LuaAPI.lua_newtable(L);
-            LuaAPI.xlua_pushasciistring(L, "read");
-            LuaAPI.lua_pushstdcallcfunction(L, templateRead);
-            LuaAPI.lua_rawset(L, -3);
+            new LuaRegister{name ="read", function = Read},
+            new LuaRegister{name = null, function = null}
+        };
+
+        //[MonoPInvokeCallback(typeof(LuaFunction))]
+        public static int OpenLib(LuaState L)
+        {
+            LuaAPI.luaL_newlib(L, l);
             return 1;
         }
     }

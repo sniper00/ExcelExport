@@ -1,10 +1,8 @@
 using System.Text.Json;
-using XLua;
-using LuaAPI = XLua.LuaDLL.Lua;
-using RealStatePtr = System.IntPtr;
-using LuaCSFunction = XLua.LuaDLL.lua_CSFunction;
 using System.IO;
 using System.Text;
+using KeraLua;
+using LuaState = System.IntPtr;
 
 namespace ExcelExport
 {
@@ -12,16 +10,14 @@ namespace ExcelExport
     {
         const int MAX_DEPTH = 64;
 
-        [MonoPInvokeCallbackAttribute(typeof(LuaCSFunction))]
-
-        static long array_size(RealStatePtr L, int index)
+        static long ArraySize(LuaState L, int index)
         {
             // test first key
             LuaAPI.lua_pushnil(L);
             if (LuaAPI.lua_next(L, index) == 0) // empty table
                 return 0;
 
-            long firstkey = LuaAPI.lua_isinteger(L, -2) ? LuaAPI.lua_toint64(L, -2) : 0;
+            long firstkey = LuaAPI.lua_isinteger(L, -2) == 1 ? LuaAPI.luaL_checkinteger(L, -2) : 0;
             LuaAPI.lua_pop(L, 2);
 
             if (firstkey <= 0)
@@ -36,8 +32,8 @@ namespace ExcelExport
                 * A border in a table t is any natural number that satisfies the following condition :
                 * (border == 0 or t[border] ~= nil) and t[border + 1] == nil
                 */
-                uint objlen1 = LuaAPI.xlua_objlen(L, index);
-                LuaAPI.lua_pushint64(L, objlen1);
+                int objlen1 = LuaAPI.luaL_rawlen(L, index);
+                LuaAPI.lua_pushinteger(L, objlen1);
                 if (LuaAPI.lua_next(L, index) != 0) // has more fields?
                 {
                     LuaAPI.lua_pop(L, 2);
@@ -46,16 +42,16 @@ namespace ExcelExport
                 return objlen1;
             }
 
-            uint objlen = LuaAPI.xlua_objlen(L, index);
+            int objlen = LuaAPI.luaL_rawlen(L, index);
             if (firstkey > objlen)
                 return 0;
 
             LuaAPI.lua_pushnil(L);
             while (LuaAPI.lua_next(L, index) != 0)
             {
-                if (LuaAPI.lua_isinteger(L, -2))
+                if (LuaAPI.lua_isinteger(L, -2) == 1)
                 {
-                    var x = LuaAPI.lua_toint64(L, -2);
+                    var x = LuaAPI.lua_tointeger(L, -2);
                     if (x > 0 && x <= objlen)
                     {
                         LuaAPI.lua_pop(L, 1);
@@ -68,23 +64,23 @@ namespace ExcelExport
             return objlen;
         }
 
-        static void EncodeTable(Utf8JsonWriter writer, RealStatePtr L, int idx, int depth = 0)
+        static void EncodeTable(Utf8JsonWriter writer, LuaState L, int idx, int depth = 0)
         {
             if ((++depth) > MAX_DEPTH)
                 throw new LuaException("json.encode_table nested too depth");
 
             if (idx < 0)
                 idx = LuaAPI.lua_gettop(L) + idx + 1;
-            if (!LuaAPI.lua_checkstack(L, 6))
+            if (LuaAPI.lua_checkstack(L, 6)==0)
                 throw new LuaException("json.encode_table stack overflow");
 
-            long size = array_size(L, idx);
+            long size = ArraySize(L, idx);
             if (size > 0)
             {
                 writer.WriteStartArray();
                 for (long i = 1; i <= size; i++)
                 {
-                    LuaAPI.xlua_rawgeti(L, idx, i);
+                    LuaAPI.lua_rawgeti(L, idx, i);
                     EncodeOne(writer, L, -1, depth);
                     LuaAPI.lua_pop(L, 1);
                 }
@@ -96,20 +92,20 @@ namespace ExcelExport
                 LuaAPI.lua_pushnil(L); // [table, nil]
                 while (LuaAPI.lua_next(L, idx) != 0)
                 {
-                    var key_type = LuaAPI.lua_type(L, -2);
+                    var key_type = LuaAPI.luaL_type(L, -2);
                     switch (key_type)
                     {
-                        case LuaTypes.LUA_TSTRING:
+                        case LuaType.String:
                             {
                                 writer.WritePropertyName(LuaAPI.lua_tostring(L, -2));
                                 EncodeOne(writer, L, -1, depth);
                                 break;
                             }
-                        case LuaTypes.LUA_TNUMBER:
+                        case LuaType.Number:
                             {
-                                if (LuaAPI.lua_isinteger(L, -2))
+                                if (LuaAPI.luaL_isinteger(L, -2))
                                 {
-                                    writer.WritePropertyName(LuaAPI.lua_toint64(L, -2).ToString());
+                                    writer.WritePropertyName(LuaAPI.lua_tointeger(L, -2).ToString());
                                     EncodeOne(writer, L, -1, depth);
                                 }
                                 else
@@ -127,42 +123,42 @@ namespace ExcelExport
             }
         }
 
-        static void EncodeOne(Utf8JsonWriter writer, RealStatePtr L, int idx, int depth = 0)
+        static void EncodeOne(Utf8JsonWriter writer, LuaState L, int idx, int depth = 0)
         {
-            var t = LuaAPI.lua_type(L, idx);
+            var t = LuaAPI.luaL_type(L, idx);
             switch (t)
             {
-                case LuaTypes.LUA_TBOOLEAN:
+                case LuaType.Boolean:
                     {
-                        writer.WriteBooleanValue(LuaAPI.lua_toboolean(L, idx));
+                        writer.WriteBooleanValue(LuaAPI.luaL_toboolean(L, idx));
                         return;
                     }
-                case LuaTypes.LUA_TNUMBER:
+                case LuaType.Number:
                     {
-                        if (LuaAPI.lua_isinteger(L, idx))
-                            writer.WriteNumberValue(LuaAPI.lua_toint64(L, idx));
+                        if (LuaAPI.luaL_isinteger(L, idx))
+                            writer.WriteNumberValue(LuaAPI.lua_tointeger(L, idx));
                         else
                             writer.WriteNumberValue(LuaAPI.lua_tonumber(L, idx));
                         return;
                     }
-                case LuaTypes.LUA_TSTRING:
+                case LuaType.String:
                     {
                         writer.WriteStringValue(LuaAPI.lua_tostring(L, idx));
                         return;
                     }
-                case LuaTypes.LUA_TTABLE:
+                case LuaType.Table:
                     {
                         EncodeTable(writer, L, idx, depth);
                         return;
                     }
-                case LuaTypes.LUA_TNIL:
+                case LuaType.Nil:
                     {
                         writer.WriteNullValue();
                         return;
                     }
-                case LuaTypes.LUA_TLIGHTUSERDATA:
+                case LuaType.LightUserData:
                     {
-                        if (LuaAPI.lua_touserdata(L, idx) == RealStatePtr.Zero)
+                        if (LuaAPI.lua_touserdata(L, idx) == LuaState.Zero)
                         {
                             writer.WriteNullValue();
                             return;
@@ -172,12 +168,10 @@ namespace ExcelExport
             }
             throw new LuaException(string.Format("json encode: unsupport value type : {0}", t));
         }
-        static int Encode(RealStatePtr L)
+        static int Encode(LuaState L)
         {
-            var type = LuaAPI.lua_type(L, 1);
-            if (type != LuaTypes.LUA_TTABLE)
-                throw new LuaException("param '1' need table type");
-            bool format = LuaAPI.lua_toboolean(L, 2);
+            LuaAPI.luaL_checktype(L, 1, (int)LuaType.Table);
+            bool format = LuaAPI.luaL_toboolean(L, 2);
             LuaAPI.lua_settop(L, 1);
             using MemoryStream ms = new MemoryStream();
             using Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = format });
@@ -187,13 +181,16 @@ namespace ExcelExport
             return 1;
         }
 
-        [MonoPInvokeCallbackAttribute(typeof(LuaCSFunction))]
-        public static int OpenLib(RealStatePtr L)
+        static readonly LuaRegister[] l = new LuaRegister[]
         {
-            LuaAPI.lua_newtable(L);
-            LuaAPI.xlua_pushasciistring(L, "encode");
-            LuaAPI.lua_pushstdcallcfunction(L, Encode);
-            LuaAPI.lua_rawset(L, -3);
+            new LuaRegister{name ="encode", function = Encode},
+            new LuaRegister{name = null, function = null}
+        };
+
+        [MonoPInvokeCallback(typeof(LuaFunction))]
+        public static int OpenLib(LuaState L)
+        {
+            LuaAPI.luaL_newlib(L, l);
             return 1;
         }
     }
