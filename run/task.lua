@@ -1,4 +1,5 @@
 local core = require("task.core")
+local json = require("json")
 
 local MAIN_ID = 1
 
@@ -57,6 +58,7 @@ end
 task.PTYPE_LUA = 1
 task.PTYPE_ERROR = 2
 task.PTYPE_TIMER = 3
+task.PTYPE_HTTP = 4
 
 task.MAIN_TASK_NAME = "MainTask"
 
@@ -488,5 +490,189 @@ function task.wait_all(fnlist)
     return res
 end
 
+local util = require("util")
+
+reg_protocol {
+    name = "http",
+    PTYPE = task.PTYPE_HTTP,
+    pack = default_pack,
+    dispatch = function(sender, session, data)
+        local co = session_id_coroutine[session]
+        if co then
+            session_id_coroutine[session] = nil
+            coresume(co, data)
+            return
+        end
+    end
+}
+
+function task.http_get(uri)
+    local session = task.make_response(task.id)
+    util.http_request(task.id, session, uri, "GET")
+    local res, err = co_yield()
+    if not res then
+        return {status_code = -1, content = err}
+    end
+    return json.decode(res)
+end
+
+local json_content_type = {["Content-Type"]="application/json"}
+function task.http_post_json(uri, tb)
+    local session = task.make_response(task.id)
+    util.http_request(task.id, session, uri, "POST", json.encode(tb), json_content_type)
+    local res, err = co_yield()
+    if not res then
+        return {status_code = -1, content = err}
+    end
+    return json.decode(res)
+end
+
+local function escape(s)
+	return (string.gsub(s, "([^A-Za-z0-9_])", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end))
+end
+
+local form_content_type ={["Content-Type"] = "application/x-www-form-urlencoded"}
+function task.http_post_form(uri, tb)
+    local body = {}
+	for k,v in pairs(tb) do
+		table.insert(body, string.format("%s=%s",escape(k),escape(v)))
+	end
+
+    local session = task.make_response(task.id)
+    util.http_request(task.id, session, uri, "POST", table.concat(body , "&"), form_content_type)
+    local res, err = co_yield()
+    if not res then
+        return {status_code = -1, content = err}
+    end
+    return json.decode(res)
+end
+
+do
+local strsub        = string.sub
+local strgsub       = string.gsub
+local strupper      = string.upper
+local tbinsert      = table.insert
+
+function string.split(input, delimiter)
+    local resultStrList = {}
+    local _ = strgsub(input,'[^'..delimiter..']+',function ( w )
+        tbinsert(resultStrList,w)
+    end)
+    return resultStrList
+end
+
+local _TRIM_CHARS = " \t\n\r"
+
+function string.ltrim(input, chars)
+    chars = chars or _TRIM_CHARS
+    local pattern = "^[" .. chars .. "]+"
+    return strgsub(input, pattern, "")
+end
+
+function string.rtrim(input, chars)
+    chars = chars or _TRIM_CHARS
+    local pattern = "[" .. chars .. "]+$"
+    return strgsub(input, pattern, "")
+end
+
+function string.trim(input, chars)
+    chars = chars or _TRIM_CHARS
+    local pattern = "^[" .. chars .. "]+"
+    input = strgsub(input, pattern, "")
+    pattern = "[" .. chars .. "]+$"
+    return strgsub(input, pattern, "")
+end
+
+function string.ucfirst(input)
+    return strupper(strsub(input, 1, 1)) .. strsub(input, 2)
+end
+    
+local math_floor = math.floor
+local strfmt     = string.format
+local strlen        = string.len
+local dbgtrace   = debug.traceback
+local strrep        = string.rep
+local strsplit      = string.split
+local strtrim       = string.trim
+local tsort         = table.sort
+local tbconcat = table.concat
+local tbinsert = table.insert
+
+local pairs = pairs
+local ipairs = ipairs
+local tostring = tostring
+local type = type
+
+local function _dump_value(v)
+    if type(v) == "string" then
+        v = "\"" .. v .. "\""
+    end
+    return tostring(v)
+end
+
+local function _dump_key(v)
+    if type(v) == "number" then
+        v = "[" .. v .. "]"
+    end
+    return tostring(v)
+end
+
+_G["print_r"] = function (value, desciption, nesting, _print)
+    if type(nesting) ~= "number" then nesting = 10 end
+    _print = _print or task.print
+
+    local lookup = {}
+    local result = {}
+    local traceback = strsplit(dbgtrace("", 2), "\n")
+    tbinsert(result,"\ndump from: " .. strtrim(traceback[2]).."\n")
+
+    local function _dump(_value, _desciption, _indent, nest, keylen)
+        _desciption = _desciption or "<var>"
+        local spc = ""
+        if type(keylen) == "number" then
+            spc = strrep(" ", keylen - strlen(_dump_key(_desciption)))
+        end
+        if type(_value) ~= "table" then
+            result[#result + 1] = strfmt("%s%s%s = %s,", _indent, _dump_key(_desciption),
+            spc, _dump_value(_value))
+        elseif lookup[tostring(_value)] then
+            result[#result + 1] = strfmt("%s%s%s = '*REF*',", _indent, _dump_key(_desciption), spc)
+        else
+            lookup[tostring(_value)] = true
+            if nest > nesting then
+                result[#result + 1] = strfmt("%s%s = '*MAX NESTING*',", _indent, _dump_key(_desciption))
+            else
+                result[#result + 1] = strfmt("%s%s = {", _indent, _dump_key(_desciption))
+                local indent2 = _indent .. "    "
+                local keys = {}
+                keylen = 0
+                local values = {}
+                for k, v in pairs(_value) do
+                    keys[#keys + 1] = k
+                    local vk = _dump_value(k)
+                    local vkl = strlen(vk)
+                    if vkl > keylen then keylen = vkl end
+                    values[k] = v
+                end
+                tsort(keys, function(a, b)
+                    if type(a) == "number" and type(b) == "number" then
+                        return a < b
+                    else
+                        return tostring(a) < tostring(b)
+                    end
+                end)
+                for _, k in ipairs(keys) do
+                    _dump(values[k], k, indent2, nest + 1, keylen)
+                end
+                result[#result + 1] = strfmt("%s},", _indent)
+            end
+        end
+    end
+    _dump(value, desciption, " ", 1)
+    _print(tbconcat(result,"\n"))
+end
+end
 
 return task

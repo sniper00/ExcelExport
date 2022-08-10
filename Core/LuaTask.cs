@@ -14,6 +14,7 @@ namespace LuaTask
         Lua = 1,
         Error = 2,
         Timer = 3,
+        Http = 4,
     }
 
     public enum LogLevel

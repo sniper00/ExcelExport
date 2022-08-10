@@ -1,7 +1,9 @@
 {
   "profiles": {
     "ExcelExport": {
-      "commandName": "Project"
+      "commandName": "Project",
+      "commandLineArgs": "main.lua src out",
+      "workingDirectory": "$(SolutionDir)\\run"
     }
   }
 }

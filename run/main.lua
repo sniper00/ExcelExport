@@ -69,6 +69,16 @@ if task.name == "MainTask" then
             os.exit(-1)
         end
 
+        -- local message = {
+        --     msgtype = "text",
+        --     text = {
+        --         content = table.concat({"error"}, "\n")
+        --     }
+        -- }
+
+        -- local uri = "https://www.baidu.com"
+        -- print_r(task.http_post_json(uri, message))
+
         print("Export config success. cost", (os.clock() - begin_time) .. "s")
         exit = true
     end)

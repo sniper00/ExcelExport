@@ -472,7 +472,7 @@ namespace KeraLua
                 return;
             }
 
-            byte[] buffer = Encoding.ASCII.GetBytes(value);
+            byte[] buffer = Encoding.UTF8.GetBytes(value);
             lua_pushbuffer(L, buffer);
         }
 
@@ -480,7 +480,7 @@ namespace KeraLua
         /// Pushes a string onto the stack
         /// </summary>
         /// <param name="value"></param>
-        internal static void lua_pushutf8string(LuaState L, string value)
+        internal static void lua_pushasciistring(LuaState L, string value)
         {
             if (value == null)
             {
@@ -488,7 +488,7 @@ namespace KeraLua
                 return;
             }
 
-            byte[] buffer = Encoding.UTF8.GetBytes(value);
+            byte[] buffer = Encoding.ASCII.GetBytes(value);
             lua_pushbuffer(L, buffer);
         }
 
@@ -546,7 +546,7 @@ namespace KeraLua
             byte[] buffer = lua_checkbuffer(L, argument);
             if (buffer == null)
                 return null;
-            return Encoding.ASCII.GetString(buffer);
+            return Encoding.UTF8.GetString(buffer);
         }
 
         /// <summary>
@@ -572,7 +572,7 @@ namespace KeraLua
         }
 
         /// <summary>
-        /// Converts the Lua value at the given index to the signed integral type lua_Integer. The Lua value must be an integer, or a number or string convertible to an integer (see ¡ì3.4.3); otherwise, lua_tointegerx returns 0. 
+        /// Converts the Lua value at the given index to the signed integral type lua_Integer. The Lua value must be an integer, or a number or string convertible to an integer (see ï¿½ï¿½3.4.3); otherwise, lua_tointegerx returns 0. 
         /// </summary>
         /// <param name="index"></param>
         /// <returns></returns>
@@ -601,7 +601,6 @@ namespace KeraLua
         {
             UIntPtr len;
             IntPtr buff = lua_tolstring(L, index, out len);
-            lua_pop(L, 1);
 
             if (buff == IntPtr.Zero)
                 return null;
@@ -625,7 +624,7 @@ namespace KeraLua
             byte[] buffer = lua_tobuffer(L, index);
             if (buffer == null)
                 return null;
-            return Encoding.ASCII.GetString(buffer);
+            return Encoding.UTF8.GetString(buffer);
         }
 
         internal static bool luaL_isinteger(lua_State L, int index)
@@ -708,13 +707,13 @@ namespace KeraLua
         /// <returns></returns>
         internal static LuaStatus luaL_loadstring(LuaState L, string chunk, string name = null)
         {
-            byte[] buffer = Encoding.ASCII.GetBytes(chunk);
+            byte[] buffer = Encoding.UTF8.GetBytes(chunk);
             return luaL_loadbuffer(L, buffer, name);
         }
 
         /// <summary>
         ///  Pushes a new C closure onto the stack. When a C function is created, it is possible to associate 
-        ///  some values with it, thus creating a C closure (see ¡ì4.4); these values are then accessible to the function 
+        ///  some values with it, thus creating a C closure (see ï¿½ï¿½4.4); these values are then accessible to the function 
         ///  whenever it is called. To associate values with a C function, first these values must be pushed onto the 
         ///  stack (when there are multiple values, the first value is pushed first). 
         ///  Then lua_pushcclosure is called to create and push the C function onto the stack, 

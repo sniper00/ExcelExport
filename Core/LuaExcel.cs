@@ -71,7 +71,7 @@ namespace ExcelExport
 
         static void PushString(LuaState L, object o)
         {
-            LuaAPI.lua_pushutf8string(L, (string)o);
+            LuaAPI.lua_pushstring(L, (string)o);
         }
 
         static Dictionary<Type, TypePush> ToLuaMap = new Dictionary<Type, TypePush>

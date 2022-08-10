@@ -3,6 +3,8 @@ using System.IO;
 using System.Text;
 using KeraLua;
 using LuaState = System.IntPtr;
+using System.Collections.Generic;
+using System;
 
 namespace ExcelExport
 {
@@ -71,7 +73,7 @@ namespace ExcelExport
 
             if (idx < 0)
                 idx = LuaAPI.lua_gettop(L) + idx + 1;
-            if (LuaAPI.lua_checkstack(L, 6)==0)
+            if (LuaAPI.lua_checkstack(L, 6) == 0)
                 throw new LuaException("json.encode_table stack overflow");
 
             long size = ArraySize(L, idx);
@@ -175,15 +177,195 @@ namespace ExcelExport
             LuaAPI.lua_settop(L, 1);
             using MemoryStream ms = new MemoryStream();
             using Utf8JsonWriter writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = format });
-            EncodeOne(writer, L, 1, 0);
+            EncodeOne(writer, L, 1);
             writer.Flush();
             LuaAPI.lua_pushstring(L, Encoding.UTF8.GetString(ms.ToArray()));
             return 1;
         }
 
+        public class LuaPushHandler
+        {
+            Stack<int> stack = new Stack<int>();
+            LuaState L;
+
+            public LuaPushHandler(LuaState L)
+            {
+                this.L = L;
+            }
+
+            public bool Bool(bool b)
+            {
+                LuaAPI.lua_pushboolean(L, b);
+                Commit();
+                return true;
+            }
+
+            public bool Long(long i)
+            {
+                LuaAPI.lua_pushinteger(L, i);
+                Commit();
+                return true;
+            }
+
+            public bool Double(double d)
+            {
+                LuaAPI.lua_pushnumber(L, d);
+                Commit();
+                return true;
+            }
+
+            public bool String(string str) {
+                LuaAPI.lua_pushstring(L, str);
+                Commit();
+                return true;
+            }
+
+            public bool StartObject()
+            {
+                LuaAPI.luaL_checkstack(L, 20, null);
+                LuaAPI.lua_createtable(L, 0, 8);
+                stack.Push(0);// 0 means hash, >0 means array
+                return true;
+            }
+
+            public bool Key(string str)
+            {
+                if (str.Length == 0)
+                {
+                    return false;
+                }
+                char c = str[0];
+                if (c == '-' || (c >= '0' && c <= '9'))
+                {
+                    if (long.TryParse(str, out long res))
+                    {
+                        LuaAPI.lua_pushinteger(L, res);
+                        return true;
+                    }
+                }
+                LuaAPI.lua_pushstring(L, str);
+                return true;
+            }
+
+            public bool EndObject()
+            {
+                stack.Pop();
+                Commit();
+                return true;
+            }
+
+            public bool StartArray()
+            {
+                LuaAPI.luaL_checkstack(L, 20, null);
+                LuaAPI.lua_createtable(L, 8, 0);
+                stack.Push(1);
+                return true;
+            }
+
+            public bool EndArray()
+            {
+                stack.Pop();
+                Commit();
+                return true;
+            }
+
+            void Commit()
+            {
+                if (stack.TryPeek(out int v))
+                {
+                    if (v == 0)
+                    {
+                        LuaAPI.lua_rawset(L, -3);
+                    }
+                    else
+                    {
+                        LuaAPI.lua_rawseti(L, -2, v++);
+                        stack.Pop();
+                        stack.Push(v);
+                    }
+                }
+            }
+        }
+
+        static void DecodeOne(Utf8JsonReader reader, LuaPushHandler handler)
+        {
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.StartArray:
+                        {
+                            handler.StartArray();
+                            break;
+                        }
+                    case JsonTokenType.EndArray:
+                        {
+                            handler.EndArray();
+                            break;
+                        }
+                    case JsonTokenType.StartObject:
+                        {
+                            handler.StartObject();
+                            break;
+                        }
+                    case JsonTokenType.EndObject:
+                        {
+                            handler.EndObject();
+                            break;
+                        }
+                    case JsonTokenType.PropertyName:
+                        {
+                            handler.Key(reader.GetString());
+                            break;
+                        }
+                    case JsonTokenType.String:
+                        {
+                            handler.String(reader.GetString());
+                            break;
+                        }
+                    case JsonTokenType.Number:
+                        {
+                            if(reader.TryGetInt64(out long v))
+                            {
+                                handler.Long(v);
+                            }
+                            else
+                            {
+                                handler.Double(reader.GetDouble());
+                            }
+                            break;
+                        }
+                    case JsonTokenType.True:
+                    case JsonTokenType.False:
+                        {
+                            handler.Bool(reader.GetBoolean());
+                            break;
+                        }
+                }
+            }
+        }
+
+        static int Decode(LuaState L)
+        {
+            try
+            {
+                var content = LuaAPI.lua_checkbuffer(L, 1);
+                LuaAPI.lua_settop(L, 1);
+                Utf8JsonReader reader = new Utf8JsonReader(content);
+                LuaPushHandler handler = new LuaPushHandler(L);
+                DecodeOne(reader, handler);
+                return 1;
+            }
+            catch(Exception ex)
+            {
+                return LuaAPI.luaL_error(L, ex.Message);
+            }
+        }
+
         static readonly LuaRegister[] l = new LuaRegister[]
         {
             new LuaRegister{name ="encode", function = Encode},
+            new LuaRegister{name ="decode", function = Decode},
             new LuaRegister{name = null, function = null}
         };
 

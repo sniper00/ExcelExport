@@ -74,6 +74,7 @@ namespace ExcelExport
                 {
                     throw new LuaException(LuaAPI.lua_tostring(L, -1));
                 }
+                mgr.Shutdown();
                 return 0;
             }
             catch(Exception ex)

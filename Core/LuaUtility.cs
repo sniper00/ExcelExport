@@ -1,6 +1,12 @@
 ﻿using System;
+using System.Text;
+using System.Text.Json;
+using System.Collections.Generic;
 using KeraLua;
 using LuaState = System.IntPtr;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using LuaTask;
 
 namespace ExcelExport
 {
@@ -64,10 +70,85 @@ namespace ExcelExport
             return 1;
         }
 
+        public class HttpResponse
+        {
+            public int status_code { get; set; }
+            public string version { get; set; }
+            public HttpResponseHeaders headers { get; set; }
+            public string content { get; set; }
+        }
+
+        static async void DoHttpRequest(TaskManager mgr, long id, long session, string method, string uri, string content, Dictionary<string, string> headers)
+        {
+            try
+            {
+                var httpRequestMessage = new HttpRequestMessage(new HttpMethod(method), uri);
+                if (content != null)
+                    httpRequestMessage.Content = new StringContent(content);
+
+                if (null != headers)
+                {
+                    foreach (var v in headers)
+                    {
+                        if(string.Compare(v.Key, "Content-Type", true) == 0)
+                        {
+                            httpRequestMessage.Content.Headers.ContentType = new MediaTypeHeaderValue(v.Value);
+                        }
+                        else
+                        {
+                            httpRequestMessage.Content.Headers.TryAddWithoutValidation(v.Key, v.Value);
+                        }
+                    }
+                }
+
+                var client = new HttpClient();
+
+                HttpResponseMessage httpResponseMessage = await client.SendAsync(httpRequestMessage);
+
+                var httpResponse = new HttpResponse();
+                httpResponse.status_code = (int)httpResponseMessage.StatusCode;
+                httpResponse.version = httpResponseMessage.Version.ToString();
+                httpResponse.headers = httpResponseMessage.Headers;
+                httpResponse.content = await httpResponseMessage.Content.ReadAsStringAsync();
+                var str = JsonSerializer.Serialize(httpResponse);
+                mgr.SendMessage(0, id, Encoding.UTF8.GetBytes(str), -session, PTYPE.Http);
+            }
+            catch(Exception ex)
+            {
+                mgr.SendMessage(0, id, Encoding.UTF8.GetBytes(ex.Message), -session, PTYPE.Error);
+            }
+        }
+
+        static public int HttpRequest(LuaState L)
+        {
+            var id = LuaAPI.luaL_checkinteger(L, 1);
+            var session = LuaAPI.luaL_checkinteger(L, 2);
+            string uri = LuaAPI.lua_checkstring(L, 3);
+            string method = LuaAPI.lua_checkstring(L, 4);
+            string content = null;
+            if (0 != LuaAPI.lua_isstring(L, 5))
+                content = LuaAPI.lua_tostring(L, 5);
+            Dictionary<string, string> headers = null;
+            if(LuaType.Table == LuaAPI.luaL_type(L, 6))
+            {
+                headers = new Dictionary<string, string>();
+                LuaAPI.lua_pushnil(L);
+                while (LuaAPI.lua_next(L, -2)!=0)
+                {
+                    headers.Add(LuaAPI.lua_checkstring(L, -2), LuaAPI.lua_checkstring(L, -1));
+                    LuaAPI.lua_pop(L, 1);
+                }
+            }
+            LuaService S = LuaService.FromIntPtr(L);
+            DoHttpRequest(S.taskManager, id, session, method, uri, content, headers);
+            return 0;
+        }
+
         static readonly LuaRegister[] l = new LuaRegister[]
         {
-            new LuaRegister{name ="format", function = StringFormat},
+            new LuaRegister{name ="strfmt", function = StringFormat},
             new LuaRegister{name ="cpu", function = GetCpuNum},
+            new LuaRegister{name ="http_request", function = HttpRequest},
             new LuaRegister{name = null, function = null}
         };
 
