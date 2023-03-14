@@ -7,7 +7,7 @@ local util = require("util")
 local print = task.print
 
 local error_count = 0
-local function fatil(...)
+local function fatal(...)
     error_count = error_count + 1
     task.error(...)
 end
@@ -65,7 +65,7 @@ if task.name == "MainTask" then
         task.wait_all(fn)
 
         if total_error_count > 0 then
-            fatil("has error, check it", total_error_count)
+            fatal("has error, check it", total_error_count)
             os.exit(-1)
         end
 
@@ -153,7 +153,7 @@ else
             if string.sub(name, 1, 2) ~= "~$" then
                 local res, err = excel.read(file)
                 if not res then
-                    fatil(err)
+                    fatal(err)
                     return
                 end
                 if not IgnoreFiles[name] then
@@ -316,7 +316,7 @@ else
                 local fn = load(check)
                 local ok = xpcall(fn, debug.traceback)
                 if not ok then
-                    fatil(strfmt("Excel file '%s' col '%s' unsupport data format, maybe server not need this field"
+                    fatal(strfmt("Excel file '%s' col '%s' unsupport data format, maybe server not need this field"
                         , filename, colname))
                     return data
                 end
@@ -435,7 +435,7 @@ else
                                 if trait and trait.decode then
                                     local ok, res, empty = xpcall(trait.decode, debug.traceback, value, filename, name)
                                     if not ok then
-                                        fatil(strfmt("Excel file '%s' col '%s' rawdata %s format error: %s",
+                                        fatal(strfmt("Excel file '%s' col '%s' rawdata %s format error: %s",
                                             filename, name, tostring(value), res))
                                     else
                                         if not hasEmptyTable then
@@ -463,7 +463,7 @@ else
 
                     if key then
                         if resTb[key] then
-                            fatil(strfmt("Excel file '%s' row %d key duplicate!", filename, i))
+                            fatal(strfmt("Excel file '%s' row %d key duplicate!", filename, i))
                         else
                             resTb[key] = setmetatable(onerow, rowmt)
                         end
@@ -604,7 +604,7 @@ else
         end
 
         local filter = {}
-
+        
         for name, v in pairs(publishdata) do
             local fn = filter[name]
             if fn then
@@ -613,6 +613,7 @@ else
             end
             -- print_r(v.data)
             writefile(fs.join(OutputDir, name .. ".lua"), v.content)
+            --writefile(fs.join(OutputDir, name .. ".json"),  json.encode(v.data))
         end
 
         return error_count
